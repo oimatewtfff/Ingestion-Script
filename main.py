@@ -2,6 +2,7 @@ import os
 import argparse
 import pathspec
 import hashlib
+from typing import Dict, List, Optional
 from tqdm import tqdm
 from openai import OpenAI
 from halo import Halo
@@ -9,10 +10,14 @@ from qdrant_client import QdrantClient, models
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
 from colorama import Fore, Style, init
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, PrivateAttr
+
 
 init(autoreset=True)
 
-EXT_TO_LANG = {
+
+EXT_TO_LANG: Dict[str, Language] = {
     ".py": Language.PYTHON,
     ".js": Language.JS,
     ".jsx": Language.JS,
@@ -49,45 +54,63 @@ EXT_TO_LANG = {
 }
 
 
-class EmbeddingProvider:
-    def __init__(self, api_key: str, base_url: str, embd_model: str):
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.embd_model = embd_model
+class Settings(BaseSettings):
+    qdrant_url: str
+    base_llm_provider_url: str
+    llm_provider_api_key: str
+    embd_model: str
+    embd_vector_size: int
 
-    def get_embedding(self, text: str):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+
+class EmbeddingProvider(BaseModel):
+    api_key: str
+    base_url: str
+    embd_model: str
+
+    _client: OpenAI = PrivateAttr()
+
+    def model_post_init(self) -> None:
+        self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+
+    def get_embedding(self, text: str) -> List[float]:
         text = text.replace("\n", " ")
-        response = self.client.embeddings.create(input=[text], model=self.embd_model)
+        response = self._client.embeddings.create(input=[text], model=self.embd_model)
         return response.data[0].embedding
 
 
-class App:
-    def __init__(
-        self,
-        project_path: str,
-        collection_name: str | None = None,
-        qdrant_url: str = "http://localhost:6333",
-        base_llm_provider_url: str = "http://localhost:1234/v1",
-        llm_provider_api_key: str = "not-needed",
-        embd_model: str = "text-embedding-nomic-embed-text-v1.5",
-        embd_vector_size: int = 768,
-    ):
-        self.client = QdrantClient(qdrant_url)
-        self.provider = EmbeddingProvider(
-            api_key=llm_provider_api_key,
-            base_url=base_llm_provider_url,
-            embd_model=embd_model,
+class App(BaseModel):
+    project_path: str
+    qdrant_url: str
+    base_llm_provider_url: str
+    llm_provider_api_key: str
+    embd_model: str
+    embd_vector_size: int
+    collection_name: Optional[str] = None
+
+    _client: QdrantClient = PrivateAttr()
+    _provider: EmbeddingProvider = PrivateAttr()
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def model_post_init(self) -> None:
+        self._client = QdrantClient(self.qdrant_url)
+        self._provider = EmbeddingProvider(
+            api_key=self.llm_provider_api_key,
+            base_url=self.base_llm_provider_url,
+            embd_model=self.embd_model,
         )
-        self.embd_vector_size = int(embd_vector_size)
-        self.project_path = project_path
-        if not collection_name:
-            folder_name = os.path.basename(os.path.abspath(project_path))
-            collection_name = (
+
+        if not self.collection_name:
+            folder_name = os.path.basename(os.path.abspath(self.project_path))
+            self.collection_name = (
                 f"{folder_name.lower().replace('-', '_').replace(' ', '_')}_codebase"
             )
 
-        self.collection_name = collection_name
-
-    def _get_gitignore_spec(self):
+    def _get_gitignore_spec(self) -> pathspec.PathSpec:
         gitignore_path = os.path.join(self.project_path, ".gitignore")
         if os.path.exists(gitignore_path):
             with open(gitignore_path, "r", encoding="utf-8") as f:
@@ -96,22 +119,22 @@ class App:
             "gitwildmatch", ["node_modules/", "dist/", ".git/"]
         )
 
-    def _init_collection(self):
+    def _init_collection(self) -> None:
         spinner = Halo(
             text=f" Проверка коллекции {self.collection_name}...", spinner="dots"
         ).start()
         try:
-            if not self.client.collection_exists(self.collection_name):
-                self.client.create_collection(
+            if not self._client.collection_exists(self.collection_name):
+                self._client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(
                         size=self.embd_vector_size, distance=Distance.COSINE
                     ),
                 )
-                self.client.create_payload_index(
+                self._client.create_payload_index(
                     self.collection_name, "path", models.PayloadSchemaType.KEYWORD
                 )
-                self.client.create_payload_index(
+                self._client.create_payload_index(
                     self.collection_name, "hash", models.PayloadSchemaType.KEYWORD
                 )
                 spinner.succeed(f" Коллекция {self.collection_name} создана.")
@@ -123,10 +146,7 @@ class App:
             spinner.fail(f" Ошибка базы данных: {e}")
             exit(1)
 
-    def _index_files(self):
-        """
-        Индексация файлов с защитой от дубликатов и пропуском неизмененных данных.
-        """
+    def _index_files(self) -> None:
         project_path = os.path.abspath(self.project_path)
         spec = self._get_gitignore_spec()
 
@@ -135,7 +155,8 @@ class App:
         scan_spinner = Halo(
             text=" Сканирование файлов проекта...", spinner="dots"
         ).start()
-        files_to_index = []
+
+        files_to_index: List[str] = []
         for root, dirs, files in os.walk(project_path):
             rel_root = os.path.relpath(root, project_path)
             dirs[:] = [
@@ -178,7 +199,7 @@ class App:
 
                     current_hash = hashlib.md5(code.encode()).hexdigest()
 
-                    search_result = self.client.scroll(
+                    search_result = self._client.scroll(
                         collection_name=self.collection_name,
                         scroll_filter=models.Filter(
                             must=[
@@ -213,12 +234,12 @@ class App:
                     )
                     chunks = splitter.split_text(code)
 
-                    response = self.provider.client.embeddings.create(
-                        input=chunks, model=self.provider.embd_model
+                    response = self._provider._client.embeddings.create(
+                        input=chunks, model=self._provider.embd_model
                     )
                     vectors = [item.embedding for item in response.data]
 
-                    points = []
+                    points: List[PointStruct] = []
                     for i, chunk in enumerate(chunks):
                         unique_id_str = f"{path}_{i}"
                         point_id = (
@@ -239,7 +260,7 @@ class App:
                             )
                         )
 
-                    self.client.upsert(
+                    self._client.upsert(
                         collection_name=self.collection_name, points=points
                     )
                     progress_bar.update(1)
@@ -255,31 +276,42 @@ class App:
         print(f"💽 Обновлено/Добавлено: {indexed_count}")
         print(f"⏩ Пропущено без изменений: {skipped_count}")
 
-    def run(self):
+    def run(self) -> None:
         self._index_files()
 
 
 if __name__ == "__main__":
+    config = Settings()
     parser = argparse.ArgumentParser(description="Умная индексация кода в Qdrant")
     parser.add_argument("project_path", help="Путь к папке проекта")
     parser.add_argument("--collection_name", help="Имя коллекции")
-    parser.add_argument("--embd_model", help="Имя модели эмбеддинга")
-    parser.add_argument("--embd_vector_size", type=int, help="Размер вектора")
-    parser.add_argument("--qdrant_url", help="URL Qdrant")
-    parser.add_argument("--base_llm_provider_url", help="URL провайдера LLM")
-    parser.add_argument("--llm_provider_api_key", help="API ключ провайдера LLM")
+    parser.add_argument(
+        "--embd_model", default=config.embd_model, help="Имя модели эмбеддинга"
+    )
+    parser.add_argument(
+        "--embd_vector_size",
+        type=int,
+        default=config.embd_vector_size,
+        help="Размер вектора",
+    )
+    parser.add_argument("--qdrant_url", default=config.qdrant_url, help="URL Qdrant")
+    parser.add_argument(
+        "--base_llm_provider_url",
+        default=config.base_llm_provider_url,
+        help="URL провайдера LLM",
+    )
+    parser.add_argument(
+        "--llm_provider_api_key",
+        default=config.llm_provider_api_key,
+        help="API ключ провайдера LLM",
+    )
 
     args = parser.parse_args()
 
     if bool(args.base_llm_provider_url) != bool(args.llm_provider_api_key):
-        parser.error(
-            "Аргументы --base_llm_provider_url и --llm_provider_api_key требуют наличия друг друга."
-        )
-
+        parser.error("Аргументы URL провайдера и API ключа должны быть заданы вместе.")
     if bool(args.embd_model) != bool(args.embd_vector_size):
-        parser.error(
-            "Аргументы --embd_model и --embd_vector_size требуют наличия друг друга."
-        )
+        parser.error("Аргументы модели и размера вектора должны быть заданы вместе.")
 
     init_kwargs = {
         k: v for k, v in vars(args).items() if v is not None and k != "project_path"
