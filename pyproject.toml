@@ -5,7 +5,10 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "halo>=0.0.31",
     "langchain-text-splitters>=1.1.1",
+    "openai>=2.24.0",
+    "pathspec>=1.0.4",
     "qdrant-client>=1.17.0",
     "sentence-transformers>=5.2.3",
     "watchdog>=6.0.0",
