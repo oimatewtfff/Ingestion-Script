@@ -1,17 +1,20 @@
 # 🗂️ Ingestion Script
+
 **Умная индексация кодовой базы в векторный поиск Qdrant.**
+
 - Превратите ваш код в знания для RAG-агентов за считанные секунды. Поддержка `.gitignore`, инкрементальное обновление и совместимость с OpenAI API (Local LLM/Ollama).
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg) ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-# ✨ Возможности (Features)
+## ✨ Возможности (Features)
+
 - 🧠 **Инкрементальная индексация:** Вычисляет MD5-хеши файлов и пропускает неизмененные. Экономит время и токены.
 - 🛡️ **Умная фильтрация:** Автоматически учитывает правила `.gitignore`.
 - 🔌 **LLM Agnostic:** Работает с любым провайдером, совместимым с OpenAI API (OpenAI, LM Studio, Ollama, vLLM).
 - 🧩 **Мультиязычность:** Поддержка разбиения (chunking) для 30+ языков программирования (Python, JS/TS, Go, Rust, C++, и др.).
 - 📊 **Визуализация:** Наглядный UX: прогресс-бары и спиннеры (Halo, Tqdm).
 
-# 📒 Поддерживаемые языки
+## 📒 Поддерживаемые языки
 
 <details>
 <summary>📦 Список поддерживаемых расширений</summary>
@@ -50,15 +53,17 @@
 
 ---
 
-# 🛠 Требования (Prerequisites)
+## 🛠 Требования (Prerequisites)
+
 > [!IMPORTANT]
->- **Docker** v29.1.2+
->- **Python** 3.14+
->- **Менеджер пакетов:** `uv` (рекомендуется) или `pip`
+>
+> - **Docker** v29.1.2+
+> - **Python** 3.14+
+> - **Менеджер пакетов:** `uv` (рекомендуется) или `pip`
 
-# ⚙️ Установка и Настройка
+## ⚙️ Установка и Настройка
 
-## 1. Запуск инфраструктуры
+### 1. Запуск инфраструктуры
 
 Запустите Qdrant одной командой используя Docker:
 
@@ -67,14 +72,14 @@
 docker run -d -p 6333:6333 qdrant/qdrant
 ```
 
-## 2. Клонирование репозитория
+### 2. Клонирование репозитория
 
 ```bash
 git clone https://github.com/your-username/ingestion-script.git
 cd ingestion-script
 ```
 
-## 3. Настройка переменных окружения
+### 3. Настройка переменных окружения
 
 Скопируйте файл `.env.template` и переименуйте его в `.env`:
 
@@ -87,9 +92,9 @@ copy .env.template .env
 cp .env.template .env
 ```
 
-## 4. Установите зависимости
+### 4. Установите зависимости
 
-### Вариант А: Через `uv` (Рекомендуемый)
+#### Вариант А: Через `uv` (Рекомендуемый)
 
 ```bash
 # 1. Создание venv и установка зависимостей (одной командой)
@@ -99,7 +104,7 @@ uv venv && uv sync
 uv run main.py '/path/to/your/project'
 ```
 
-### Вариант Б: Через стандартный `pip`
+#### Вариант Б: Через стандартный `pip`
 
 Классический способ.
 
@@ -120,13 +125,13 @@ pip install -r requirements.txt
 python main.py '/path/to/your/project'
 ```
 
-**и отредактируйте при необходимости постоянно использовать конкретный провайдер и модель**
+и отредактируйте при необходимости постоянно использовать конкретный провайдер и модель
 
-# ⏭️ Примеры запуска с конфигурацией провайдеров
+## ⏭️ Примеры запуска с конфигурацией провайдеров
 
 Вы можете задать эти параметры в файле `.env` или передать их через аргументы командной строки при запуске скрипта.
 
-## 1. Использование OpenAI (оригинал)
+### 1. Использование OpenAI (оригинал)
 
 В `.env` файле:
 
@@ -143,7 +148,7 @@ EMBD_VECTOR_SIZE=1536
 uv run main.py '/path/to/your/project' --base_llm_provider_url "https://api.openai.com/v1" --llm_provider_api_key "sk-proj-XXXXXX..." --embd_model "text-embedding-3-small" --embd_vector_size 1536
 ```
 
-## 2. Использование локального сервера (LM Studio или Ollama)
+### 2. Использование локального сервера (LM Studio или Ollama)
 
 В `.env` файле:
 
@@ -160,7 +165,7 @@ EMBD_VECTOR_SIZE=768
 uv run main.py '/path/to/your/project' --base_llm_provider_url "http://localhost:1234/v1" --llm_provider_api_key "not-needed" --embd_model "nomic-ai/nomic-embed-text-v1.5-GGUF" --embd_vector_size 768
 ```
 
-## 3. Использование облачных провайдеров (Together AI)
+### 3. Использование облачных провайдеров (Together AI)
 
 В `.env` файле:
 
@@ -177,24 +182,24 @@ EMBD_VECTOR_SIZE=768
 uv run main.py '/path/to/your/project' --base_llm_provider_url "https://api.together.xyz/v1" --llm_provider_api_key "your_together_api_key" --embd_model "togethercomputer/m2-bert-80M-8k-retrieval" --embd_vector_size 768
 ```
 
-# 🏗️ Технические детали и Архитектура
+## 🏗️ Технические детали и Архитектура
 
-## Схема процесса (Workflow)
+### Схема процесса (Workflow)
 
 ```mermaid
 graph TD
     Start((Начало)) --> Scan["Сканирование файлов (с учетом .gitignore)"]
     Scan --> Loop{"Для каждого файла"}
-    
+
     Loop --> Hash["Вычисление MD5 хеша"]
     Hash --> Check{"Хеш есть в Qdrant?"}
-    
+
     Check -- Да --> Skip["Пропустить файл"]
     Check -- Нет --> Split["Разбиение на чанки (RecursiveCharacterTextSplitter)"]
-    
+
     Split --> Embed["Генерация эмбеддингов (OpenAI API / Local LLM)"]
     Embed --> Upsert["Сохранение в Qdrant (Vector + Metadata)"]
-    
+
     Upsert --> Next["Следующий файл"]
     Skip --> Next
     Next --> Loop
@@ -205,20 +210,24 @@ graph TD
     style Upsert fill:#28a745,stroke:#1e7e34,color:#fff,font-weight:bold
 ```
 
-## Структура данных в Qdrant:
+### Структура данных в Qdrant
+
 > [!NOTE]
->- **path**: Полный путь к файлу (используется для фильтрации).
->- **content**: Текст чанка с заголовком в виде имени файла.
->- **language**: Язык программирования для фильтрации запросов.
->- **hash**: MD5-хеш версии файла на момент индексации.
+>
+> - **path**: Полный путь к файлу (используется для фильтрации).
+> - **content**: Текст чанка с заголовком в виде имени файла.
+> - **language**: Язык программирования для фильтрации запросов.
+> - **hash**: MD5-хеш версии файла на момент индексации.
 
-# 🪲 Решение проблем (Troubleshooting)
+## 🪲 Решение проблем (Troubleshooting)
 
-## Типичные проблемы:
+### Типичные проблемы
+
 > [!CAUTION]
->- **Connection Error**: Убедитесь, что Qdrant доступен по адресу http://localhost:6333. Если вы запускаете скрипт внутри другого контейнера, используйте имя сервиса.
->- **Dimension Mismatch**: Если вы сменили модель эмбеддингов, нужно либо создать новую коллекцию, либо удалить старую, так как размер вектора (EMBD_VECTOR_SIZE) фиксируется при создании.
+>
+> - **Connection Error**: Убедитесь, что Qdrant доступен по адресу <http://localhost:6333>. Если вы запускаете скрипт внутри другого контейнера, используйте имя сервиса.
+> - **Dimension Mismatch**: Если вы сменили модель эмбеддингов, нужно либо создать новую коллекцию, либо удалить старую, так как размер вектора (EMBD_VECTOR_SIZE) фиксируется при создании.
 
-# 📄 Лицензия и Вклад
+## 📄 Лицензия и Вклад
 
 Этот проект распространяется под лицензией **MIT**.
