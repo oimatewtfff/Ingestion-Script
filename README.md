@@ -183,17 +183,17 @@ uv run main.py '/path/to/your/project' --base_llm_provider_url "https://api.toge
 
 ```mermaid
 graph TD
-    Start((Начало)) --> Scan["Сканирование файлов <br/> <i>(с учетом .gitignore)</i>"]
+    Start((Начало)) --> Scan["Сканирование файлов (с учетом .gitignore)"]
     Scan --> Loop{"Для каждого файла"}
     
     Loop --> Hash["Вычисление MD5 хеша"]
     Hash --> Check{"Хеш есть в Qdrant?"}
     
     Check -- Да --> Skip["Пропустить файл"]
-    Check -- Нет --> Split["Разбиение на чанки <br/> <i>(RecursiveCharacterTextSplitter)</i>"]
+    Check -- Нет --> Split["Разбиение на чанки (RecursiveCharacterTextSplitter)"]
     
-    Split --> Embed["Генерация эмбеддингов <br/> <i>(OpenAI API / Local LLM)</i>"]
-    Embed --> Upsert["Сохранение в Qdrant <br/> <i>(Vector + Metadata)</i>"]
+    Split --> Embed["Генерация эмбеддингов (OpenAI API / Local LLM)"]
+    Embed --> Upsert["Сохранение в Qdrant (Vector + Metadata)"]
     
     Upsert --> Next["Следующий файл"]
     Skip --> Next
