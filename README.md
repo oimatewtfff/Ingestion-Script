@@ -1,12 +1,10 @@
 # 🗂️ Ingestion Script
-
-> **Умная индексация кодовой базы в векторный поиск Qdrant.**
-> Превратите ваш код в знания для RAG-агентов за считанные секунды. Поддержка `.gitignore`, инкрементальное обновление и совместимость с OpenAI API (Local LLM/Ollama).
+**Умная индексация кодовой базы в векторный поиск Qdrant.**
+- Превратите ваш код в знания для RAG-агентов за считанные секунды. Поддержка `.gitignore`, инкрементальное обновление и совместимость с OpenAI API (Local LLM/Ollama).
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg) ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 # ✨ Возможности (Features)
-
 - 🧠 **Инкрементальная индексация:** Вычисляет MD5-хеши файлов и пропускает неизмененные. Экономит время и токены.
 - 🛡️ **Умная фильтрация:** Автоматически учитывает правила `.gitignore`.
 - 🔌 **LLM Agnostic:** Работает с любым провайдером, совместимым с OpenAI API (OpenAI, LM Studio, Ollama, vLLM).
@@ -53,10 +51,10 @@
 ---
 
 # 🛠 Требования (Prerequisites)
-
-- **Docker** v29.1.2+
-- **Python** 3.14+
-- **Менеджер пакетов:** `uv` (рекомендуется) или `pip`
+> [!IMPORTANT]
+>- **Docker** v29.1.2+
+>- **Python** 3.14+
+>- **Менеджер пакетов:** `uv` (рекомендуется) или `pip`
 
 # ⚙️ Установка и Настройка
 
@@ -185,41 +183,41 @@ uv run main.py '/path/to/your/project' --base_llm_provider_url "https://api.toge
 
 ```mermaid
 graph TD
-    Start((Начало)) --> Scan[Сканирование файлов (с учетом .gitignore)]
-    Scan --> Loop{Для каждого файла}
-
-    Loop --> Hash[Вычисление MD5 хеша]
-    Hash --> Check{Хеш есть в Qdrant?}
-
-    Check -- Да --> Skip[Пропустить файл]
-    Check -- Нет --> Split[Разбиение на чанки (RecursiveCharacterTextSplitter)]
-
-    Split --> Embed[Генерация эмбеддингов (OpenAI API / Local LLM)]
-    Embed --> Upsert[Сохранение в Qdrant (Vector + Metadata)]
-
-    Upsert --> Next[Следующий файл]
+    Start((Начало)) --> Scan["Сканирование файлов <br/> <i>(с учетом .gitignore)</i>"]
+    Scan --> Loop{"Для каждого файла"}
+    
+    Loop --> Hash["Вычисление MD5 хеша"]
+    Hash --> Check{"Хеш есть в Qdrant?"}
+    
+    Check -- Да --> Skip["Пропустить файл"]
+    Check -- Нет --> Split["Разбиение на чанки <br/> <i>(RecursiveCharacterTextSplitter)</i>"]
+    
+    Split --> Embed["Генерация эмбеддингов <br/> <i>(OpenAI API / Local LLM)</i>"]
+    Embed --> Upsert["Сохранение в Qdrant <br/> <i>(Vector + Metadata)</i>"]
+    
+    Upsert --> Next["Следующий файл"]
     Skip --> Next
     Next --> Loop
     Loop -- Все файлы обработаны --> End((Конец))
 
-    style Check fill:#f9f,stroke:#333,stroke-width:2px
-    style Skip fill:#fff4dd,stroke:#d4a017
-    style Upsert fill:#d4edda,stroke:#28a745
+    style Check fill:#f9f,stroke:#333,stroke-width:2px,color:#000,font-weight:bold
+    style Skip fill:#fff4dd,stroke:#d4a017,color:#000,font-weight:bold
+    style Upsert fill:#28a745,stroke:#1e7e34,color:#fff,font-weight:bold
 ```
 
 ## Структура данных в Qdrant:
-
-- **path**: Полный путь к файлу (используется для фильтрации).
-- **content**: Текст чанка с заголовком в виде имени файла.
-- **language**: Язык программирования для фильтрации запросов.
-- **hash**: MD5-хеш версии файла на момент индексации.
+> [!NOTE]
+>- **path**: Полный путь к файлу (используется для фильтрации).
+>- **content**: Текст чанка с заголовком в виде имени файла.
+>- **language**: Язык программирования для фильтрации запросов.
+>- **hash**: MD5-хеш версии файла на момент индексации.
 
 # 🪲 Решение проблем (Troubleshooting)
 
 ## Типичные проблемы:
-
-- **Connection Error**: Убедитесь, что Qdrant доступен по адресу http://localhost:6333. Если вы запускаете скрипт внутри другого контейнера, используйте имя сервиса.
-- **Dimension Mismatch**: Если вы сменили модель эмбеддингов, нужно либо создать новую коллекцию, либо удалить старую, так как размер вектора (EMBD_VECTOR_SIZE) фиксируется при создании.
+> [!CAUTION]
+>- **Connection Error**: Убедитесь, что Qdrant доступен по адресу http://localhost:6333. Если вы запускаете скрипт внутри другого контейнера, используйте имя сервиса.
+>- **Dimension Mismatch**: Если вы сменили модель эмбеддингов, нужно либо создать новую коллекцию, либо удалить старую, так как размер вектора (EMBD_VECTOR_SIZE) фиксируется при создании.
 
 # 📄 Лицензия и Вклад
 
