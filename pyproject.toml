@@ -1,0 +1,12 @@
+[project]
+name = "ingestion-script"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "langchain-text-splitters>=1.1.1",
+    "qdrant-client>=1.17.0",
+    "sentence-transformers>=5.2.3",
+    "watchdog>=6.0.0",
+]
