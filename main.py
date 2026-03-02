@@ -7,7 +7,8 @@ from halo import Halo
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
-
+from colorama import Fore, Style
+import hashlib
 
 EXT_TO_LANG = {
     # Python
@@ -130,12 +131,16 @@ class App:
             exit(1)
 
     def _index_files(self):
-        """Внутренний метод индексации, использующий состояние объекта App"""
+        """Внутренний метод с исправленным выводом (tqdm + postfix вместо двойного Halo)"""
         project_path = os.path.abspath(self.project_path)
         spec = self._get_gitignore_spec()
 
+        # Статический спиннер для подготовки (остановится до начала цикла)
         self._init_collection()
 
+        scan_spinner = Halo(
+            text=" Сканирование файлов проекта...", spinner="dots"
+        ).start()
         files_to_index = []
         for root, dirs, files in os.walk(project_path):
             rel_root = os.path.relpath(root, project_path)
@@ -152,16 +157,23 @@ class App:
                     files_to_index.append(os.path.join(root, file))
 
         if not files_to_index:
-            print(" Подходящих файлов для индексации не найдено.")
+            scan_spinner.warn(" Подходящих файлов не найдено.")
             return
+
+        scan_spinner.succeed(f" Файлов для обработки: {len(files_to_index)}")
 
         with tqdm(
             total=len(files_to_index),
-            desc=" Индексация проекта",
+            desc="🗂️ Индексация",
             unit="file",
             colour="green",
+            dynamic_ncols=True,
         ) as progress_bar:
             for path in files_to_index:
+                file_name = os.path.basename(path)
+                colored_name = f"{Fore.CYAN}{file_name[:20]}{Style.RESET_ALL}"
+                progress_bar.set_postfix({"file": colored_name}, refresh=True)
+
                 try:
                     ext = os.path.splitext(path)[1].lower()
                     lang = EXT_TO_LANG[ext]
@@ -174,30 +186,44 @@ class App:
                     )
                     chunks = splitter.split_text(code)
 
+                    response = self.provider.client.embeddings.create(
+                        input=chunks, model=self.provider.embd_model
+                    )
+                    vectors = [item.embedding for item in response.data]
+
                     points = []
                     for i, chunk in enumerate(chunks):
-                        vector = self.provider.get_embedding(chunk)
+                        unique_key = f"{path}_{i}"
+
+                        point_id = (
+                            int(hashlib.md5(unique_key.encode()).hexdigest(), 16)
+                            % 10**15
+                        )
+
                         points.append(
                             PointStruct(
-                                id=hash(f"{path}_{i}") % 10**10,
-                                vector=vector,
+                                id=point_id,
+                                vector=vectors[i],
                                 payload={
                                     "path": path,
-                                    "content": chunk,
+                                    "content": f"File: {file_name}\n\n{chunk}",
                                     "language": str(lang),
                                 },
                             )
                         )
 
-                    if points:
-                        self.client.upsert(
-                            collection_name=self.collection_name, points=points
-                        )
+                    self.client.upsert(
+                        collection_name=self.collection_name, points=points
+                    )
 
                     progress_bar.update(1)
                 except Exception as e:
-                    tqdm.write(f" Ошибка в файле {path}: {e}")
+                    progress_bar.write(
+                        f"{Fore.RED}❌ Ошибка в {file_name}: {e}{Style.RESET_ALL}"
+                    )
                     progress_bar.update(1)
+
+        print(f"\n✅ Готово! Код проиндексирован в '{self.collection_name}'")
 
     def run(self):
         """Теперь запуск максимально прост"""
@@ -210,14 +236,30 @@ if __name__ == "__main__":
 
     parser.add_argument("--collection_name", help="Имя коллекции")
     parser.add_argument("--embd_model", help="Имя модели эмбеддинга")
+    parser.add_argument(
+        "--embd_vector_size", type=int, help="Размер вектора для модели"
+    )
     parser.add_argument("--qdrant_url", help="URL Qdrant")
-    parser.add_argument("--base_llm_provider_url", help="URL провайдера (LM Studio)")
+    parser.add_argument("--base_llm_provider_url", help="URL провайдера LLM")
+    parser.add_argument("--llm_provider_api_key", help="API ключ провайдера LLM")
 
     args = parser.parse_args()
+
+    if bool(args.base_llm_provider_url) != bool(args.llm_provider_api_key):
+        parser.error(
+            "Аргументы --base_llm_provider_url и --llm_provider_api_key "
+            "должны передаваться вместе (или оба отсутствовать)."
+        )
+
+    if bool(args.embd_model) != bool(args.embd_vector_size):
+        parser.error(
+            "Аргументы --embd_model и --embd_vector_size "
+            "должны передаваться вместе (или оба отсутствовать)."
+        )
 
     init_kwargs = {
         k: v for k, v in vars(args).items() if v is not None and k != "project_path"
     }
 
-    app = App(**init_kwargs, project_path=args.project_path)
+    app = App(project_path=args.project_path, **init_kwargs)
     app.run()
