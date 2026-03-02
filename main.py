@@ -2,7 +2,7 @@ import os
 import argparse
 import pathspec
 import hashlib
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from tqdm import tqdm
 from openai import OpenAI
 from halo import Halo
@@ -73,7 +73,7 @@ class EmbeddingProvider(BaseModel):
 
     _client: OpenAI = PrivateAttr()
 
-    def model_post_init(self) -> None:
+    def model_post_init(self, context: Any) -> None:
         self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def get_embedding(self, text: str) -> List[float]:
@@ -96,7 +96,7 @@ class App(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def model_post_init(self) -> None:
+    def model_post_init(self, context: Any) -> None:
         self._client = QdrantClient(self.qdrant_url)
         self._provider = EmbeddingProvider(
             api_key=self.llm_provider_api_key,
@@ -189,9 +189,6 @@ class App(BaseModel):
         ) as progress_bar:
             for path in files_to_index:
                 file_name = os.path.basename(path)
-                progress_bar.set_postfix(
-                    {"file": f"{Fore.CYAN}{file_name[:15]}{Style.RESET_ALL}"}
-                )
 
                 try:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
