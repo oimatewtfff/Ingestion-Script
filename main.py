@@ -1,59 +1,49 @@
 import os
 import argparse
 import pathspec
+import hashlib
 from tqdm import tqdm
 from openai import OpenAI
 from halo import Halo
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
-from colorama import Fore, Style
-import hashlib
+from colorama import Fore, Style, init
+
+init(autoreset=True)
 
 EXT_TO_LANG = {
-    # Python
     ".py": Language.PYTHON,
-    # JavaScript / TypeScript / React
     ".js": Language.JS,
     ".jsx": Language.JS,
     ".ts": Language.TS,
     ".tsx": Language.TS,
-    # C / C++ / C#
     ".c": Language.C,
     ".cpp": Language.CPP,
     ".hpp": Language.CPP,
     ".cc": Language.CPP,
     ".cs": Language.CSHARP,
-    # Go
     ".go": Language.GO,
-    # Java / Kotlin / Scala
     ".java": Language.JAVA,
     ".kt": Language.KOTLIN,
     ".scala": Language.SCALA,
-    # Ruby / Rust / Swift / Elixir
     ".rb": Language.RUBY,
     ".rs": Language.RUST,
     ".swift": Language.SWIFT,
     ".ex": Language.ELIXIR,
     ".exs": Language.ELIXIR,
-    # PHP
     ".php": Language.PHP,
-    # Web (HTML / Markdown / RST / LaTeX)
     ".html": Language.HTML,
     ".md": Language.MARKDOWN,
     ".rst": Language.RST,
     ".tex": Language.LATEX,
-    # SQL / Solidity
     ".sol": Language.SOL,
-    # Shell / Scripting
     ".lua": Language.LUA,
     ".pl": Language.PERL,
     ".ps1": Language.POWERSHELL,
-    # Data / Logic / Protobuf
     ".r": Language.R,
     ".proto": Language.PROTO,
     ".hs": Language.HASKELL,
-    # Legacy / Enterprise
     ".cbl": Language.COBOL,
     ".vb": Language.VISUALBASIC6,
 }
@@ -66,7 +56,6 @@ class EmbeddingProvider:
 
     def get_embedding(self, text: str):
         text = text.replace("\n", " ")
-
         response = self.client.embeddings.create(input=[text], model=self.embd_model)
         return response.data[0].embedding
 
@@ -88,7 +77,7 @@ class App:
             base_url=base_llm_provider_url,
             embd_model=embd_model,
         )
-        self.embd_vector_size = embd_vector_size
+        self.embd_vector_size = int(embd_vector_size)
         self.project_path = project_path
         if not collection_name:
             folder_name = os.path.basename(os.path.abspath(project_path))
@@ -99,7 +88,6 @@ class App:
         self.collection_name = collection_name
 
     def _get_gitignore_spec(self):
-        """Внутренний метод для загрузки правил игнорирования"""
         gitignore_path = os.path.join(self.project_path, ".gitignore")
         if os.path.exists(gitignore_path):
             with open(gitignore_path, "r", encoding="utf-8") as f:
@@ -109,7 +97,6 @@ class App:
         )
 
     def _init_collection(self):
-        """Инициализация коллекции в Qdrant с использованием self.client"""
         spinner = Halo(
             text=f" Проверка коллекции {self.collection_name}...", spinner="dots"
         ).start()
@@ -121,6 +108,12 @@ class App:
                         size=self.embd_vector_size, distance=Distance.COSINE
                     ),
                 )
+                self.client.create_payload_index(
+                    self.collection_name, "path", models.PayloadSchemaType.KEYWORD
+                )
+                self.client.create_payload_index(
+                    self.collection_name, "hash", models.PayloadSchemaType.KEYWORD
+                )
                 spinner.succeed(f" Коллекция {self.collection_name} создана.")
             else:
                 spinner.info(
@@ -131,11 +124,12 @@ class App:
             exit(1)
 
     def _index_files(self):
-        """Внутренний метод с исправленным выводом (tqdm + postfix вместо двойного Halo)"""
+        """
+        Индексация файлов с защитой от дубликатов и пропуском неизмененных данных.
+        """
         project_path = os.path.abspath(self.project_path)
         spec = self._get_gitignore_spec()
 
-        # Статический спиннер для подготовки (остановится до начала цикла)
         self._init_collection()
 
         scan_spinner = Halo(
@@ -160,26 +154,59 @@ class App:
             scan_spinner.warn(" Подходящих файлов не найдено.")
             return
 
-        scan_spinner.succeed(f" Файлов для обработки: {len(files_to_index)}")
+        scan_spinner.succeed(f" Файлов для анализа: {len(files_to_index)}")
+
+        skipped_count = 0
+        indexed_count = 0
 
         with tqdm(
             total=len(files_to_index),
-            desc="🗂️ Индексация",
+            desc="🗂️ Подготовка",
             unit="file",
             colour="green",
             dynamic_ncols=True,
         ) as progress_bar:
             for path in files_to_index:
                 file_name = os.path.basename(path)
-                colored_name = f"{Fore.CYAN}{file_name[:20]}{Style.RESET_ALL}"
-                progress_bar.set_postfix({"file": colored_name}, refresh=True)
+                progress_bar.set_postfix(
+                    {"file": f"{Fore.CYAN}{file_name[:15]}{Style.RESET_ALL}"}
+                )
 
                 try:
-                    ext = os.path.splitext(path)[1].lower()
-                    lang = EXT_TO_LANG[ext]
-
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         code = f.read()
+
+                    current_hash = hashlib.md5(code.encode()).hexdigest()
+
+                    search_result = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="path", match=models.MatchValue(value=path)
+                                ),
+                                models.FieldCondition(
+                                    key="hash",
+                                    match=models.MatchValue(value=current_hash),
+                                ),
+                            ]
+                        ),
+                        limit=1,
+                        with_payload=False,
+                        with_vectors=False,
+                    )[0]
+
+                    if search_result:
+                        skipped_count += 1
+                        progress_bar.set_description(f"🗂️ Пропущено: {skipped_count}")
+                        progress_bar.update(1)
+                        continue
+
+                    indexed_count += 1
+                    progress_bar.set_description(f"🚀 Индексация: {indexed_count}")
+
+                    ext = os.path.splitext(path)[1].lower()
+                    lang = EXT_TO_LANG[ext]
 
                     splitter = RecursiveCharacterTextSplitter.from_language(
                         language=lang, chunk_size=1200, chunk_overlap=150
@@ -193,10 +220,9 @@ class App:
 
                     points = []
                     for i, chunk in enumerate(chunks):
-                        unique_key = f"{path}_{i}"
-
+                        unique_id_str = f"{path}_{i}"
                         point_id = (
-                            int(hashlib.md5(unique_key.encode()).hexdigest(), 16)
+                            int(hashlib.md5(unique_id_str.encode()).hexdigest(), 16)
                             % 10**15
                         )
 
@@ -208,6 +234,7 @@ class App:
                                     "path": path,
                                     "content": f"File: {file_name}\n\n{chunk}",
                                     "language": str(lang),
+                                    "hash": current_hash,
                                 },
                             )
                         )
@@ -215,30 +242,29 @@ class App:
                     self.client.upsert(
                         collection_name=self.collection_name, points=points
                     )
-
                     progress_bar.update(1)
+
                 except Exception as e:
                     progress_bar.write(
                         f"{Fore.RED}❌ Ошибка в {file_name}: {e}{Style.RESET_ALL}"
                     )
                     progress_bar.update(1)
 
-        print(f"\n✅ Готово! Код проиндексирован в '{self.collection_name}'")
+        print(f"\n{Fore.GREEN}✅ Синхронизация завершена!{Style.RESET_ALL}")
+        print(f"📦 Коллекция: {self.collection_name}")
+        print(f"💽 Обновлено/Добавлено: {indexed_count}")
+        print(f"⏩ Пропущено без изменений: {skipped_count}")
 
     def run(self):
-        """Теперь запуск максимально прост"""
         self._index_files()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Умная индексация кода в Qdrant")
     parser.add_argument("project_path", help="Путь к папке проекта")
-
     parser.add_argument("--collection_name", help="Имя коллекции")
     parser.add_argument("--embd_model", help="Имя модели эмбеддинга")
-    parser.add_argument(
-        "--embd_vector_size", type=int, help="Размер вектора для модели"
-    )
+    parser.add_argument("--embd_vector_size", type=int, help="Размер вектора")
     parser.add_argument("--qdrant_url", help="URL Qdrant")
     parser.add_argument("--base_llm_provider_url", help="URL провайдера LLM")
     parser.add_argument("--llm_provider_api_key", help="API ключ провайдера LLM")
@@ -247,14 +273,12 @@ if __name__ == "__main__":
 
     if bool(args.base_llm_provider_url) != bool(args.llm_provider_api_key):
         parser.error(
-            "Аргументы --base_llm_provider_url и --llm_provider_api_key "
-            "должны передаваться вместе (или оба отсутствовать)."
+            "Аргументы --base_llm_provider_url и --llm_provider_api_key требуют наличия друг друга."
         )
 
     if bool(args.embd_model) != bool(args.embd_vector_size):
         parser.error(
-            "Аргументы --embd_model и --embd_vector_size "
-            "должны передаваться вместе (или оба отсутствовать)."
+            "Аргументы --embd_model и --embd_vector_size требуют наличия друг друга."
         )
 
     init_kwargs = {
